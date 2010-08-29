@@ -23,6 +23,14 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+I would like to thank and give credit to the following references I consulted while
+writing this lib:
+
+http://moyix.blogspot.com/2007/08/pdb-stream-decomposition.html
+http://undocumented.rawol.com/ (Sven Boris Schreiber's site, of Undocumented Windows 2000 Secrets fame).
+
 */
 
 #define _FILE_OFFSET_BITS 64
@@ -36,9 +44,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 typedef struct PDB_FILE PDB_FILE;
+typedef struct PDB_STREAM PDB_STREAM;
 
 const char PDB_SIGNATURE_V2[] = "Microsoft C/C++ program database 2.00\r\n";
 const char PDB_SIGNATURE_V7[] = "Microsoft C/C++ MSF 7.00\r\n";
+
+#define PDB_HEADER_SIZE_V2 (sizeof(PDB_SIGNATURE_V2) + 4)
+#define PDB_HEADEr_SIZE_V7 (sizeof(PDB_SIGNATURE_V7) + 5)
 
 
 struct PDB_FILE
@@ -52,9 +64,42 @@ struct PDB_FILE
 };
 
 
+struct PDB_STREAM
+{
+	PDB_FILE* pdb;
+};
+
+
 static void PrintHelp()
 {
 	fprintf(stderr, "Usage: pdbp [pdb file]\n");
+}
+
+
+static bool PdbCheckFileSize(PDB_FILE* pdb)
+{
+	off_t currentOffset;
+
+	// Don't divide by zero
+	if (pdb->pageSize == 0)
+		return false;
+
+	// Preserve the current offset, we are going to validate the file size
+	currentOffset = ftello(pdb->file);
+
+	// Goto the end of the file
+	if (fseeko(pdb->file, 0, SEEK_END))
+		return false;
+
+	// See if the size yields the expected number of pages
+	if ((ftello(pdb->file) / pdb->pageSize) != pdb->pageCount)
+		return false;
+
+	// Return to the saved offset
+	if (fseeko(pdb->file, currentOffset, SEEK_SET))
+		return false;
+
+	return true;
 }
 
 
@@ -84,8 +129,6 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 		// Now check for the newer format
 		if (memcmp(PDB_SIGNATURE_V7, buff, sizeof(PDB_SIGNATURE_V7) - 1) == 0)
 		{
-			off_t currentOffset;
-
 			pdb->version = 7;
 
 			// Expecting [unknown byte]DS\0\0
@@ -100,25 +143,14 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 			if ((fread(buff, 1, 4, pdb->file) != 4) || (*(uint32_t*)buff != 2))
 				return false;
 
-			// Number of pages in the file
+			// Get number of pages in the file
 			if ((fread(&pdb->pageCount, 1, 4, pdb->file) != 4))
 				return false;
 
-			// Preserve the current offset, we are going to validate the file size
-			currentOffset = ftello(pdb->file);
-
-			// Goto the end of the file
-			if (fseeko(pdb->file, 0, SEEK_END))
+			// Ensure that this matches the actual file size
+			if (!PdbCheckFileSize(pdb))
 				return false;
 
-			// See if the size yields the expected number of pages
-			if ((ftello(pdb->file) * pdb->pageSize) != pdb->pageCount)
-				return false;
-
-			// Return to the saved offset
-			if (fseeko(pdb->file, currentOffset, SEEK_SET))
-				return false;
-	
 			return true;
 		}
 	}
