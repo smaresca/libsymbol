@@ -59,14 +59,20 @@ struct PDB_FILE
 	FILE* file;
 	uint8_t version; // version from the header (2 or 7 are known)
 	uint16_t streamCount; // number of streams in the file
-	off_t pageSize; // bytes per page
-	off_t pageCount; // total file bytes / page bytes
+	uint64_t pageSize; // bytes per page
+	uint32_t pageCount; // total file bytes / page bytes
+	uint32_t flagPage;
+
+	PDB_STREAM* root;
 };
 
 
 struct PDB_STREAM
 {
 	PDB_FILE* pdb;
+	uint32_t* pages; // The indices of the pages comprising the stream
+	uint64_t currentPage; // The current page index
+	uint32_t pageCount; // Total pages in this stream
 };
 
 
@@ -103,6 +109,129 @@ static bool PdbCheckFileSize(PDB_FILE* pdb)
 }
 
 
+static uint32_t GetPageCount(PDB_FILE* pdb, uint64_t bytes)
+{
+	// Watch out for div0
+	if (pdb->pageSize == 0)
+		return 0;
+
+	// Round up in cases where it isn't a multiple of the page size
+	return (bytes / pdb->pageSize) + ((bytes % pdb->pageSize != 0) ? 1 : 0);
+}
+
+
+static PDB_STREAM* PdbOpenRootStream(PDB_FILE* pdb, uint32_t* pages, uint32_t pageCount)
+{
+	PDB_STREAM* root = (PDB_STREAM*)malloc(sizeof(PDB_STREAM));
+
+	root->pdb = pdb;
+	root->pages = pages;
+	root->pageCount = pageCount;
+	root->currentPage = 0;
+
+	return root;
+}
+
+
+static bool PdbSeekToStreamInfo(PDB_FILE* pdb, uint64_t streamId)
+{
+	uint64_t i;
+
+	for (i = 0; i < streamId - 1; i++)
+	{
+		uint32_t pageCount;
+
+		// Get the number of pages in each stream
+		if (fread(&pageCount, 1, 4, pdb->file) != 4)
+			return false;
+
+		// Skip past the page indices
+		if (fseeko(pdb->file, pageCount * 4, SEEK_CUR))
+			return false;
+	}
+
+	return true;
+}
+
+
+bool PdbSeekToStream(PDB_STREAM* stream, off_t offset)
+{
+	if (stream->pageCount)
+	{
+		uint64_t page = offset / stream->pdb->pageSize;
+
+		// Sanity check the offset
+		if (page > stream->pageCount)
+			return false;
+
+		// Goto the page containing the requested offset
+		if (fseeko(stream->pdb->file,
+			stream->pages[page] * stream->pdb->pageSize, SEEK_SET))
+			return false;
+
+		return true;
+	}
+
+	return false;
+}
+
+
+PDB_STREAM* PdbOpenStream(PDB_FILE* pdb, uint64_t streamId)
+{
+	PDB_STREAM* stream = (PDB_STREAM*)malloc(sizeof(PDB_STREAM));
+	uint32_t i;
+
+	stream->pdb = pdb;
+
+	// Need to go to the root stream to get the stream info
+	if (!PdbSeekToStream(pdb->root, 0))
+	{
+		free(stream);
+		return NULL;
+	}
+
+	// Seek to the stream info
+	if (!PdbSeekToStreamInfo(pdb, streamId))
+	{
+		free(stream);
+		return NULL;
+	}
+
+	// Get the number of pages in the stream
+	if (fread(&stream->pageCount, 1, 4, pdb->file) != 4)
+	{
+		free(stream);
+		return NULL;
+	}
+
+	// Read in the indices making up the stream
+	for (i = 0; i < stream->pageCount; i++)
+	{
+		if (fread(&stream->pages[i], 1, 4, pdb->file) != 4)
+		{
+			free(stream);
+			return NULL;
+		}
+	}
+
+	// Seek to the first page of the stream
+	if (!PdbSeekToStream(stream, 0))
+	{
+		free(stream);
+		return NULL;
+	}
+
+	return stream;
+}
+
+
+void PdbCloseStream(PDB_STREAM* stream)
+{
+	free(stream->pages);
+	free(stream);
+}
+
+
 static bool PdbParseHeader(PDB_FILE* pdb)
 {
 	char buff[sizeof(PDB_SIGNATURE_V2) + 1];
@@ -129,6 +258,9 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 		// Now check for the newer format
 		if (memcmp(PDB_SIGNATURE_V7, buff, sizeof(PDB_SIGNATURE_V7) - 1) == 0)
 		{
+			uint32_t* rootPages;
+			uint32_t rootSize, pageCount, i;
+
 			pdb->version = 7;
 
 			// Expecting [unknown byte]DS\0\0
@@ -139,8 +271,8 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 			if (fread(&pdb->pageSize, 1, 4, pdb->file) != 4)
 				return false;
 	
-			// Validate and pass "Flag Page" (don't care)
-			if ((fread(buff, 1, 4, pdb->file) != 4) || (*(uint32_t*)buff != 2))
+			// Get the flag page (an allocation table, 1 if the page is unused)
+			if (fread(&pdb->flagPage, 1, 4, pdb->file) != 4)
 				return false;
 
 			// Get number of pages in the file
@@ -151,10 +283,35 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 			if (!PdbCheckFileSize(pdb))
 				return false;
 
+			// Get the root stream size (in bytes)
+			if (fread(&rootSize, 1, 4, pdb->file) != 4)
+				return false;
+
+			// Pass reserved dword
+			if (fread(buff, 1, 4, pdb->file) != 4)
+				return false;
+
+			// Calculate the number of pages comprising the root stream
+			pageCount = GetPageCount(pdb, rootSize);
+
+			// Ensure that it's even a sane value (the header probably can't
+			// exceed the size of a single page
+			if ((pageCount * 4) > (pdb->pageSize - ftello(pdb->file)))
+				return false;
+
+			// Get the root stream pages
+			for (i = 0; i < pageCount; i++)
+			{
+				if (fread(&rootPages[i], 1, 4, pdb->file) != 4)
+					return false;
+			}
+
+			// Open the root stream
+			pdb->root = PdbOpenRootStream(pdb, rootPages, pageCount);
+
 			return true;
 		}
 	}
-
 
 	return false;
 }
@@ -181,7 +338,7 @@ PDB_FILE* PdbOpen(const char* name)
 	pdb->pageSize = 0;
 	pdb->pageCount = 0;
 
-	// Verify the PDB signature
+	// Read the header and open the root stream
 	if (!PdbParseHeader(pdb))
 	{
 		free(pdb->name);
