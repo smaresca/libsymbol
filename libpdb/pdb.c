@@ -32,19 +32,26 @@ http://moyix.blogspot.com/2007/08/pdb-stream-decomposition.html
 http://undocumented.rawol.com/ (Sven Boris Schreiber's site, of Undocumented Windows 2000 Secrets fame).
 
 */
-
 #define _FILE_OFFSET_BITS 64
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <string.h>
 #include <errno.h>
 
+#ifndef _MSC_VER
+#include <stdbool.h>
+#else
+typedef int bool;
+#define true 1
+#define false 0
 
-typedef struct PDB_FILE PDB_FILE;
-typedef struct PDB_STREAM PDB_STREAM;
+typedef __int64 off_t;
+
+#define fseeko _fseeki64
+#define ftello _ftelli64
+
+#endif /* __MSC_VER */
+
+#include "pdb.h"
 
 const char PDB_SIGNATURE_V2[] = "Microsoft C/C++ program database 2.00\r\n";
 const char PDB_SIGNATURE_V7[] = "Microsoft C/C++ MSF 7.00\r\n";
@@ -59,7 +66,7 @@ struct PDB_FILE
 	FILE* file;
 	uint8_t version; // version from the header (2 or 7 are known)
 	uint16_t streamCount; // number of streams in the file
-	uint64_t pageSize; // bytes per page
+	uint32_t pageSize; // bytes per page
 	uint32_t pageCount; // total file bytes / page bytes
 	uint32_t flagPage;
 
@@ -74,12 +81,6 @@ struct PDB_STREAM
 	uint64_t currentPage; // The current page index
 	uint32_t pageCount; // Total pages in this stream
 };
-
-
-static void PrintHelp()
-{
-	fprintf(stderr, "Usage: pdbp [pdb file]\n");
-}
 
 
 static bool PdbCheckFileSize(PDB_FILE* pdb)
@@ -109,7 +110,7 @@ static bool PdbCheckFileSize(PDB_FILE* pdb)
 }
 
 
-static uint32_t GetPageCount(PDB_FILE* pdb, uint64_t bytes)
+static uint32_t GetPageCount(PDB_FILE* pdb, uint32_t bytes)
 {
 	// Watch out for div0
 	if (pdb->pageSize == 0)
@@ -133,9 +134,9 @@ static PDB_STREAM* PdbOpenRootStream(PDB_FILE* pdb, uint32_t* pages, uint32_t pa
 }
 
 
-static bool PdbSeekToStreamInfo(PDB_FILE* pdb, uint64_t streamId)
+static bool PdbSeekToStreamInfo(PDB_FILE* pdb, uint32_t streamId)
 {
-	uint64_t i;
+	uint32_t i;
 
 	for (i = 0; i < streamId - 1; i++)
 	{
@@ -154,7 +155,7 @@ static bool PdbSeekToStreamInfo(PDB_FILE* pdb, uint64_t streamId)
 }
 
 
-bool PdbSeekToStream(PDB_STREAM* stream, off_t offset)
+static bool PdbSeekToStream(PDB_STREAM* stream, off_t offset)
 {
 	if (stream->pageCount)
 	{
@@ -176,7 +177,7 @@ bool PdbSeekToStream(PDB_STREAM* stream, off_t offset)
 }
 
 
-PDB_STREAM* PdbOpenStream(PDB_FILE* pdb, uint64_t streamId)
+PDB_STREAM* PdbOpenStream(PDB_FILE* pdb, uint32_t streamId)
 {
 	PDB_STREAM* stream = (PDB_STREAM*)malloc(sizeof(PDB_STREAM));
 	uint32_t i;
@@ -299,6 +300,9 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 			if ((pageCount * 4) > (pdb->pageSize - ftello(pdb->file)))
 				return false;
 
+			// Allocate storage for the pdb's root page list
+			rootPages = (uint32_t*)malloc(pdb->pageCount * sizeof(uint32_t));
+
 			// Get the root stream pages
 			for (i = 0; i < pageCount; i++)
 			{
@@ -306,7 +310,7 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 					return false;
 			}
 
-			// Open the root stream
+			// Open the root stream (the pdb now owns rootPages storage)
 			pdb->root = PdbOpenRootStream(pdb, rootPages, pageCount);
 
 			return true;
@@ -354,30 +358,7 @@ PDB_FILE* PdbOpen(const char* name)
 
 void PdbClose(PDB_FILE* pdb)
 {
-	if (!pdb)
-		return;
-
 	fclose(pdb->file);
 	free(pdb->name);
 	free(pdb);
-}
-
-
-int main(int argc, char** argv)
-{
-	PDB_FILE* pdb;
-
-	if (argc < 2)
-	{
-		PrintHelp();
-		return 1;
-	}
-
-	pdb = PdbOpen(argv[1]);
-	if (pdb)
-		fprintf(stderr, "Successfully opened pdb.\n");
-
-	PdbClose(pdb);
-
-	return 0;
 }
