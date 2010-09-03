@@ -35,20 +35,35 @@ http://undocumented.rawol.com/ (Sven Boris Schreiber's site, of Undocumented Win
 #ifndef __PDB_H__
 #define __PDB_H__
 
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-
 #ifdef _MSC_VER
 	#ifdef LIBPDB_EXPORTS
 		#define PDBAPI __declspec(dllexport)
 	#else
 		#define PDBAPI __declspec(dllimport)
 	#endif /* LIBPDB_EXPORTS */
+
+	typedef int bool;
+	#define true 1
+	#define false 0
+
+	typedef __int64 off_t;
+
+	#define fseeko _fseeki64
+	#define ftello _ftelli64
+
 #else // Linux
+
+	#include <stdbool.h>
+
 	#define PDBAPI __attribute__ ((visibility("default")))
 #endif /* _MSC_VER */
+
+#define _FILE_OFFSET_BITS 64
+
+
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 
 typedef struct PDB_FILE PDB_FILE;
@@ -63,8 +78,11 @@ extern "C"
 	PDBAPI PDB_FILE* PdbOpen(const char* name);
 	PDBAPI void PdbClose(PDB_FILE* pdb);
 
-	PDBAPI PDB_STREAM* PdbOpenStream(PDB_FILE* pdb, uint32_t streamId);
-	PDBAPI void PdbCloseStream(PDB_STREAM* stream);
+	PDBAPI PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId);
+	PDBAPI void PdbStreamClose(PDB_STREAM* stream);
+
+	PDBAPI bool PdbStreamRead(PDB_STREAM* stream, uint8_t* buff, uint64_t bytes);
+	PDBAPI bool PdbStreamSeek(PDB_STREAM* stream, uint64_t offset);
 
 #ifdef __cplusplus
 }
