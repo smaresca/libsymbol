@@ -76,6 +76,7 @@ extern "C"
 	PDBAPI PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId);
 	PDBAPI void PdbStreamClose(PDB_STREAM* stream);
 
+	PDBAPI uint32_t PdbStreamGetSize(PDB_STREAM* stream);
 	PDBAPI bool PdbStreamRead(PDB_STREAM* stream, uint8_t* buff, uint64_t bytes);
 	PDBAPI bool PdbStreamSeek(PDB_STREAM* stream, uint64_t offset);
 

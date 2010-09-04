@@ -20,15 +20,52 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 */
+#include <string.h>
+
 #include "pdb.h"
+
+char* g_pdbFile = NULL; // The full path and file name of the pdb file we are operating on
+bool g_dump = false; // Do we want to dump a stream?
+uint32_t g_dumpStreamId = (uint32_t)-1; // The stream id to dump if dump is true.
+
+#ifdef _MSC_VER
+#define strcasecmp _stricmp
+#endif /* _MSC_VER */
 
 
 static void PrintHelp()
 {
 	fprintf(stderr, "Usage: pdbp [options] [pdb file]\n");
 	fprintf(stderr, "Options:\n\n");
-	fprintf(stderr, "\t-l or --list-streams\t\tList the streams in the PDB file.\n");
 	fprintf(stderr, "\t-d [stream_num] or --dump-stream [stream_num]\t\tDump the data in the stream to stdout.\n");
+}
+
+
+static bool ParseCommandLine(int argc, char** argv)
+{
+	if (argc < 2)
+		return false;
+
+	if (argc == 2)
+	{
+		g_pdbFile = argv[1];
+		return true;
+	}
+
+	if (argc == 4)
+	{
+		if ((strcasecmp(argv[1], "-d") != 0)
+			&& (strcasecmp(argv[1], "--dump-stream") != 0))
+			return false;
+
+		g_dump = true;
+		g_dumpStreamId = atoi(argv[2]);
+		g_pdbFile = argv[3];
+
+		return true;
+	}
+
+	return false;
 }
 
 
@@ -36,13 +73,13 @@ int main(int argc, char** argv)
 {
 	PDB_FILE* pdb;
 
-	if (argc < 2)
+	if (!ParseCommandLine(argc, argv))
 	{
 		PrintHelp();
 		return 1;
 	}
 
-	pdb = PdbOpen(argv[argc - 1]);
+	pdb = PdbOpen(g_pdbFile);
 
 	if (!pdb)
 	{
@@ -52,6 +89,49 @@ int main(int argc, char** argv)
 
 	fprintf(stderr, "Successfully opened pdb.\n");
 	fprintf(stderr, "This file contains %d streams.\n", PdbGetStreamCount(pdb));
+
+	if (g_dump)
+	{
+		uint8_t buff[512];
+		uint32_t chunkSize;
+		uint32_t bytesRemaining;
+		PDB_STREAM* stream = PdbStreamOpen(pdb, g_dumpStreamId);
+
+		if (!stream)
+		{
+			PdbClose(pdb);
+			fprintf(stderr, "Failed to open stream %d.\n", g_dumpStreamId);
+			return 3;
+		}
+
+		bytesRemaining = PdbStreamGetSize(stream);
+
+		while (bytesRemaining)
+		{
+			if (bytesRemaining > 512)
+				chunkSize = 512;
+			else
+				chunkSize = bytesRemaining;
+
+			if (!PdbStreamRead(stream, buff, chunkSize))
+			{
+				PdbStreamClose(stream);
+				PdbClose(pdb);
+				fprintf(stderr, "Failed to read stream.\n");
+				return 4;
+			}
+
+			if (fwrite(buff, 1, chunkSize, stdout) != chunkSize)
+			{
+				PdbStreamClose(stream);
+				PdbClose(pdb);
+				fprintf(stderr, "Failed to write to stdout.\n");
+				return 5;
+			}
+
+			bytesRemaining -= chunkSize;
+		}
+	}
 
 	PdbClose(pdb);
 
