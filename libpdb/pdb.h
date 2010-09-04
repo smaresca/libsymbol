@@ -77,6 +77,7 @@ extern "C"
 
 	PDBAPI PDB_FILE* PdbOpen(const char* name);
 	PDBAPI void PdbClose(PDB_FILE* pdb);
+	PDBAPI uint32_t PdbGetStreamCount(PDB_FILE* pdb);
 
 	PDBAPI PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId);
 	PDBAPI void PdbStreamClose(PDB_STREAM* stream);

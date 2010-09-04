@@ -29,7 +29,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 static void PrintHelp()
 {
-	fprintf(stderr, "Usage: pdbp [pdb file]\n");
+	fprintf(stderr, "Usage: pdbp [options] [pdb file]\n");
+	fprintf(stderr, "Options:\n\n");
+	fprintf(stderr, "\t-l or --list-streams\t\tList the streams in the PDB file.\n");
+	fprintf(stderr, "\t-d [stream_num] or --dump-stream [stream_num]\t\tDump the data in the stream to stdout.\n");
 }
 
 
@@ -43,9 +46,16 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	pdb = PdbOpen(argv[1]);
-	if (pdb)
-		fprintf(stderr, "Successfully opened pdb.\n");
+	pdb = PdbOpen(argv[argc - 1]);
+
+	if (!pdb)
+	{
+		fprintf(stderr, "Failed to open pdb file %s\n", argv[argc - 1]);
+		return 2;
+	}
+
+	fprintf(stderr, "Successfully opened pdb.\n");
+	fprintf(stderr, "This file contains %d streams.\n", PdbGetStreamCount(pdb));
 
 	PdbClose(pdb);
 
