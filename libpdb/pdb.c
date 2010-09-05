@@ -117,39 +117,46 @@ uint32_t PdbGetStreamCount(PDB_FILE* pdb)
 }
 
 
-static bool PdbCountStreams(PDB_FILE* pdb)
-{
-	pdb->streamCount = 0;
-
-	// Seek to the beginning of the root stream
-	if (!PdbStreamSeek(pdb->root, 0))
-		return false;
-
-	// Read the first dword, it's the number of streams in the file
-	if (!PdbStreamRead(pdb->root, (uint8_t*)&pdb->streamCount, sizeof(pdb->streamCount)))
-		return false;
-
-	return true;
-}
-
-
-static bool PdbStreamOpenRoot(PDB_FILE* pdb, uint32_t* pages, uint32_t pageCount, uint32_t size)
+static bool PdbStreamOpenRoot(PDB_FILE* pdb, uint32_t rootStreamPageIndex, uint32_t size)
 {
 	PDB_STREAM* root = (PDB_STREAM*)malloc(sizeof(PDB_STREAM));
+	size_t i;
 
 	pdb->root = root;
 	root->pdb = pdb;
-	root->pages = pages;
-	root->pageCount = pageCount;
 	root->currentOffset = 0;
 	root->size = size;
 
-	// Get a count of the streams in this file
-	if (!PdbCountStreams(pdb))
-	{
-		free(root);
-		pdb->root = NULL;
+	// Calculate the number of pages comprising the root stream
+	root->pageCount = GetPageCount(pdb, size);
+
+	// Allocate storage for the pdb's root page list
+	root->pages = (uint32_t*)malloc(pdb->pageCount * sizeof(uint32_t));
+
+	// Follow yet another layer of indirection (don't be fooled by Sven's docs,
+	// the root page index in the header points to the list of indices 
+	// that comprise the root stream)
+
+	// Go to the list of page indices that belong to the root stream
+	if (fseeko(pdb->file, (rootStreamPageIndex * pdb->pageSize), SEEK_SET))
 		return false;
+
+	// Get the root stream pages
+	for (i = 0; i < root->pageCount; i++)
+	{
+		if (fread(&root->pages[i], 1, 4, pdb->file) != 4)
+			return false;
+	}
+
+	if (root->pageCount)
+	{
+		// Locate the root stream
+		if (fseeko(pdb->file, (root->pages[0] * pdb->pageSize), SEEK_SET))
+			return false;
+
+		// Read the count of the streams in this file
+		if (fread(&pdb->streamCount, 1, 4, pdb->file) != 4)
+			return false;
 	}
 
 	return true;
@@ -163,17 +170,22 @@ static bool PdbSeekToStreamInfo(PDB_FILE* pdb, uint32_t streamId)
 	// The root stream doesn't count.
 	for (i = 0; i < streamId - 1; i++)
 	{
+		uint32_t size;
 		uint32_t pageCount;
 
-		// Get the number of pages in each stream
-		if (fread(&pageCount, 1, 4, pdb->file) != 4)
+		// Get the number of bytes in each stream
+		if (fread(&size, 1, 4, pdb->file) != 4)
 			return false;
+
+		// Calculate the number of pages needed to hold the stream
+		pageCount = (size / pdb->pageSize)
+			+ ((size % pdb->pageSize != 0) ? 1 : 0);
 
 		// Skip past the page indices
 		if (fseeko(pdb->file, pageCount * 4, SEEK_CUR))
 			return false;
 
-		pdb->root->currentOffset += 4;
+		pdb->root->currentOffset += (pageCount * 4) + 4;
 	}
 
 	return true;
@@ -229,7 +241,7 @@ PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId)
 	stream->pdb = pdb;
 
 	// Need to go to the root stream to get the stream info
-	if (!PdbStreamSeek(pdb->root, 0))
+	if (!PdbStreamSeek(pdb->root, 4))
 	{
 		free(stream);
 		return NULL;
@@ -248,12 +260,13 @@ PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId)
 		free(stream);
 		return NULL;
 	}
+	pdb->root->currentOffset += 4;
 
 	// Calculate the number of pages needed
 	stream->pageCount = (stream->size / pdb->pageSize)
 		+ ((stream->size % pdb->pageSize != 0) ? 1 : 0);
 
-	stream->pages = (uint32_t*)malloc(sizeof(uint32_t*));
+	stream->pages = (uint32_t*)malloc(sizeof(uint32_t) * stream->pageCount);
 
 	// Read in the page indices that make up the stream
 	for (i = 0; i < stream->pageCount; i++)
@@ -263,6 +276,7 @@ PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId)
 			free(stream);
 			return NULL;
 		}
+		pdb->root->currentOffset += 4;
 	}
 
 	// Seek to the first page of the stream
@@ -309,8 +323,7 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 		// Now check for the newer format
 		if (memcmp(PDB_SIGNATURE_V7, buff, sizeof(PDB_SIGNATURE_V7) - 1) == 0)
 		{
-			uint32_t* rootPages;
-			uint32_t rootSize, rootPageCount, i;
+			uint32_t rootSize, rootStreamId;
 
 			pdb->version = 7;
 
@@ -347,26 +360,12 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 			if (fread(buff, 1, 4, pdb->file) != 4)
 				return false;
 
-			// Calculate the number of pages comprising the root stream
-			rootPageCount = GetPageCount(pdb, rootSize);
-
-			// Ensure that it's even a sane value (the header probably can't
-			// exceed the size of a single page
-			if ((rootPageCount * 4) > (pdb->pageSize - ftello(pdb->file)))
+			// Read the page index that contains the root stream
+			if (fread(&rootStreamId, 1, 4, pdb->file) != 4)
 				return false;
 
-			// Allocate storage for the pdb's root page list
-			rootPages = (uint32_t*)malloc(pdb->pageCount * sizeof(uint32_t));
-
-			// Get the root stream pages
-			for (i = 0; i < rootPageCount; i++)
-			{
-				if (fread(&rootPages[i], 1, 4, pdb->file) != 4)
-					return false;
-			}
-
 			// Open the root stream (the pdb now owns rootPages storage)
-			if (!PdbStreamOpenRoot(pdb, rootPages, rootPageCount, rootSize))
+			if (!PdbStreamOpenRoot(pdb, rootStreamId, rootSize))
 				return false;
 
 			return true;
