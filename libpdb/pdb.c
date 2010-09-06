@@ -132,6 +132,7 @@ static bool PdbStreamOpenRoot(PDB_FILE* pdb, uint32_t rootStreamPageIndex, uint3
 
 	// Allocate storage for the pdb's root page list
 	root->pages = (uint32_t*)malloc(pdb->pageCount * sizeof(uint32_t));
+	memset(root->pages, 0, pdb->pageCount * sizeof(uint32_t));
 
 	// Follow yet another layer of indirection (don't be fooled by Sven's docs,
 	// the root page index in the header points to the list of indices 
@@ -144,18 +145,26 @@ static bool PdbStreamOpenRoot(PDB_FILE* pdb, uint32_t rootStreamPageIndex, uint3
 	// Get the root stream pages
 	for (i = 0; i < root->pageCount; i++)
 	{
-		if (fread(&root->pages[i], 1, 4, pdb->file) != 4)
-			return false;
+		if (pdb->version == 2)
+		{
+			if (fread(&root->pages[i], 1, 2, pdb->file) != 2)
+				return false;
+		}
+		else if (pdb->version == 7)
+		{
+			if (fread(&root->pages[i], 1, 4, pdb->file) != 4)
+				return false;
+		}
 	}
 
 	if (root->pageCount)
 	{
 		// Locate the root stream
-		if (fseeko(pdb->file, (root->pages[0] * pdb->pageSize), SEEK_SET))
+		if (!PdbStreamSeek(pdb->root, 0))
 			return false;
-
+		
 		// Read the count of the streams in this file
-		if (fread(&pdb->streamCount, 1, 4, pdb->file) != 4)
+		if (!PdbStreamRead(pdb->root, (uint8_t*)&pdb->streamCount, 4))
 			return false;
 	}
 
@@ -163,30 +172,63 @@ static bool PdbStreamOpenRoot(PDB_FILE* pdb, uint32_t rootStreamPageIndex, uint3
 }
 
 
-static bool PdbSeekToStreamInfo(PDB_FILE* pdb, uint32_t streamId)
+static bool PdbSeekToStreamSize(PDB_FILE* pdb, uint32_t streamId)
 {
+	uint32_t streamSizesOffset;
+
+	// Pass the stream count, and the stream sizes before the stream of interest
+	streamSizesOffset = 4 + ((streamId - 1) * 4);
+
+	// Locate the stream size
+	if (!PdbStreamSeek(pdb->root, streamSizesOffset))
+		return false;
+
+	return true;
+}
+
+
+static bool PdbSeekToStreamPageDirectory(PDB_FILE* pdb, uint32_t streamId, uint32_t* streamSize)
+{
+	uint32_t directoriesBase; // The beginning of the directories in the root stream
+	uint32_t streamDirectoryOffset; // The offset in the page directories for the stream of interest
+	uint32_t offset; // The final offset to seek to
 	uint32_t i;
 
-	// The root stream doesn't count.
+	// Sanity check the stream id
+	if (streamId >= pdb->streamCount)
+		return false;
+
+	// Seek to the beginning of the root stream (after the stream count)
+	if (!PdbStreamSeek(pdb->root, 4))
+		return false;
+
+	*streamSize = 0;
+	streamDirectoryOffset = 0;
+
 	for (i = 0; i < streamId - 1; i++)
 	{
 		uint32_t size;
-		uint32_t pageCount;
 
-		// Get the number of bytes in each stream
-		if (fread(&size, 1, 4, pdb->file) != 4)
+		// Read each stream size
+		if (!PdbStreamRead(pdb->root, (uint8_t*)&size, 4))
 			return false;
 
-		// Calculate the number of pages needed to hold the stream
-		pageCount = (size / pdb->pageSize)
-			+ ((size % pdb->pageSize != 0) ? 1 : 0);
-
-		// Skip past the page indices
-		if (fseeko(pdb->file, pageCount * 4, SEEK_CUR))
-			return false;
-
-		pdb->root->currentOffset += (pageCount * 4) + 4;
+		// Add the number of bytes needed to store the page
+		// indices for the stream
+		streamDirectoryOffset += (4 * GetPageCount(pdb, size));
 	}
+
+	// Read the size of the stream of interest
+	if (!PdbStreamRead(pdb->root, (uint8_t*)streamSize, 4))
+		return false;
+
+	// The directories begin after the sizes
+	directoriesBase = 4 + (pdb->streamCount * 4);
+	offset = directoriesBase + streamDirectoryOffset;
+
+	// Seek to the stream directory of interest
+	if (!PdbStreamSeek(pdb->root, offset))
+		return false;
 
 	return true;
 }
@@ -240,43 +282,22 @@ PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId)
 
 	stream->pdb = pdb;
 
-	// Need to go to the root stream to get the stream info
-	if (!PdbStreamSeek(pdb->root, 4))
+	// Seek to the stream info and get the page size
+	if (!PdbSeekToStreamPageDirectory(pdb, streamId, &stream->size))
 	{
 		free(stream);
 		return NULL;
 	}
 
-	// Seek to the stream info
-	if (!PdbSeekToStreamInfo(pdb, streamId))
-	{
-		free(stream);
-		return NULL;
-	}
-
-	// Read the number of bytes in the stream
-	if (fread(&stream->size, 1, 4, pdb->file) != 4)
-	{
-		free(stream);
-		return NULL;
-	}
-	pdb->root->currentOffset += 4;
-
-	// Calculate the number of pages needed
-	stream->pageCount = (stream->size / pdb->pageSize)
-		+ ((stream->size % pdb->pageSize != 0) ? 1 : 0);
-
+	// Calculate the number of pages needed and alloc storage for the page indices
+	stream->pageCount = GetPageCount(pdb, stream->size);
 	stream->pages = (uint32_t*)malloc(sizeof(uint32_t) * stream->pageCount);
 
 	// Read in the page indices that make up the stream
 	for (i = 0; i < stream->pageCount; i++)
 	{
-		if (fread(&stream->pages[i], 1, 4, pdb->file) != 4)
-		{
-			free(stream);
-			return NULL;
-		}
-		pdb->root->currentOffset += 4;
+		if (!PdbStreamRead(pdb->root, (uint8_t*)&stream->pages[i], 4))
+			return false;
 	}
 
 	// Seek to the first page of the stream
@@ -307,6 +328,9 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 		// See if we have a match
 		if (memcmp(PDB_SIGNATURE_V2, buff, sizeof(PDB_SIGNATURE_V2) - 1) == 0)
 		{
+			uint32_t rootSize;
+			uint16_t rootStreamId;
+
 			pdb->version = 2;
 
 			// Expecting [unknown byte]JG\0
@@ -315,6 +339,29 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 
 			// Read the size of the pages in bytes (Hopefully 0x400,0x800, or 0x1000)
 			if (fread(&pdb->pageSize, 1, 4, pdb->file) != 4)
+				return false;
+
+			// Sven calls this "Start page", not sure what it's for
+			if (fread(buff, 1, 2, pdb->file) != 2)
+				return false;
+
+			// Get the number of pages in the file
+			if (fread(&pdb->pageCount, 1, 2, pdb->file) != 2)
+				return false;
+
+			// Get the number of bytes in the root stream
+			if (!fread(&rootSize, 1, 4, pdb->file) != 4)
+				return false;
+
+			// Read the total number of streams in the file
+			if (!fread(&pdb->streamCount, 1, 4, pdb->file) != 4)
+				return false;
+
+			// Get the page of the root stream directory
+			if (fread(&rootStreamId, 1, 2, pdb->file) != 2)
+				return false;
+
+			if (!PdbStreamOpenRoot(pdb, rootStreamId, rootSize))
 				return false;
 		
 			return true;
@@ -455,16 +502,17 @@ bool PdbStreamRead(PDB_STREAM* stream, uint8_t* buff, uint64_t bytes)
 	// Now read the remaining pages
 	while (bytesRemaining)
 	{
-		if (stream->currentOffset != 0)
+		if (bytesRemaining != bytes)
 		{
 			// We actually only need to seek if we are crossing a page boundary
+			// which we will always do after the first iteration
 			if (!PdbStreamSeek(stream, stream->currentOffset))
 				return false;
 		}
 
 		// We can only read a page at a time
 		// The first page may be shorter if the current offset is not at the beginning of the page
-		bytesToRead = ((size_t)bytesRemaining < bytesLeftOnPage) 
+		bytesToRead = ((size_t)bytesRemaining < bytesLeftOnPage)
 			? (size_t)bytesRemaining : bytesLeftOnPage;
 
 		if (fread(pbuff, 1, bytesToRead, stream->pdb->file) != bytesToRead)
