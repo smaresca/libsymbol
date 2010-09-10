@@ -23,10 +23,14 @@ THE SOFTWARE.
 #include <string.h>
 
 #include "pdb.h"
+#include "type_stream.h"
 
 char* g_pdbFile = NULL; // The full path and file name of the pdb file we are operating on
-bool g_dump = false; // Do we want to dump a stream?
+bool g_dumpStream = false; // Do we want to dump a stream?
 uint32_t g_dumpStreamId = (uint32_t)-1; // The stream id to dump if dump is true.
+bool g_dumpType = false; // Do we want to dump a type?
+char* g_type = NULL;
+
 
 #ifdef _MSC_VER
 #define strcasecmp _stricmp
@@ -38,6 +42,7 @@ static void PrintHelp()
 	fprintf(stderr, "Usage: pdbp [options] [pdb file]\n");
 	fprintf(stderr, "Options:\n\n");
 	fprintf(stderr, "\t-d [stream_num] or --dump-stream [stream_num]\t\tDump the data in the stream to stdout.\n");
+	fprintf(stderr, "\t dt [type name} or --dump-type [type name]\t\tDump type information to stdout.\n");
 }
 
 
@@ -56,10 +61,16 @@ static bool ParseCommandLine(int argc, char** argv)
 	{
 		if ((strcasecmp(argv[1], "-d") != 0)
 			&& (strcasecmp(argv[1], "--dump-stream") != 0))
-			return false;
-
-		g_dump = true;
-		g_dumpStreamId = atoi(argv[2]);
+		{
+			g_dumpStream = true;
+			g_dumpStreamId = atoi(argv[2]);
+		}
+		else if ((strcasecmp(argv[1], "-dt") != 0)
+			&& (strcasecmp(argv[1], "--dump-type") != 0))
+		{
+			g_dumpType = true;
+			g_type = argv[3];
+		}
 		g_pdbFile = argv[3];
 
 		return true;
@@ -90,7 +101,7 @@ int main(int argc, char** argv)
 	fprintf(stderr, "Successfully opened pdb.\n");
 	fprintf(stderr, "This file contains %d streams.\n", PdbGetStreamCount(pdb));
 
-	if (g_dump)
+	if (g_dumpStream)
 	{
 		uint8_t buff[512];
 		uint32_t chunkSize;
@@ -131,6 +142,21 @@ int main(int argc, char** argv)
 
 			bytesRemaining -= chunkSize;
 		}
+	}
+
+	if (g_dumpType)
+	{
+		// Attempt to initialize the types subsystem
+		PDB_TYPES* types = PdbTypesOpen(pdb);
+
+		if (!types)
+		{
+			fprintf(stderr, "Failed to open pdb types.\n");
+			PdbClose(pdb);
+			return 6;
+		}
+
+		PdbTypesClose(types);
 	}
 
 	PdbClose(pdb);
