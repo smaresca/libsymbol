@@ -12,9 +12,21 @@
     <ClCompile Include="pdb.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="type_stream.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pdb.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="type_stream.c">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="type_stream.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="type_stream.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
