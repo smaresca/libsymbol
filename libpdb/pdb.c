@@ -205,7 +205,7 @@ static bool PdbSeekToStreamPageDirectory(PDB_FILE* pdb, uint32_t streamId, uint3
 	*streamSize = 0;
 	streamDirectoryOffset = 0;
 
-	for (i = 0; i < streamId - 1; i++)
+	for (i = 0; i < streamId; i++)
 	{
 		uint32_t size;
 
@@ -277,9 +277,10 @@ bool PdbStreamSeek(PDB_STREAM* stream, uint64_t offset)
 
 PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId)
 {
-	PDB_STREAM* stream = (PDB_STREAM*)malloc(sizeof(PDB_STREAM));
+	PDB_STREAM* stream;
 	uint32_t i;
 
+	stream = (PDB_STREAM*)malloc(sizeof(PDB_STREAM));
 	stream->pdb = pdb;
 
 	// Seek to the stream info and get the page size
@@ -465,6 +466,12 @@ void PdbClose(PDB_FILE* pdb)
 	fclose(pdb->file);
 	free(pdb->name);
 	free(pdb);
+}
+
+
+PDB_FILE* PdbStreamGetPdb(PDB_STREAM* stream)
+{
+	return stream->pdb;
 }
 
 

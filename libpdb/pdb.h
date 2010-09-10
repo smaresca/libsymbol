@@ -62,6 +62,15 @@ http://undocumented.rawol.com/ (Sven Boris Schreiber's site, of Undocumented Win
 
 typedef struct PDB_FILE PDB_FILE;
 typedef struct PDB_STREAM PDB_STREAM;
+typedef enum PDB_STREAMS PDB_STREAMS;
+
+enum PDB_STREAMS
+{
+	PDB_STREAM_ROOT = 0,
+	PDB_STREAM_PROGRAM_INFO = 1,
+	PDB_STREAM_TYPE_INFO = 2,
+	PDB_STREAM_DEBUG_INFO = 3
+};
 
 
 #ifdef __cplusplus
@@ -76,6 +85,7 @@ extern "C"
 	PDBAPI PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId);
 	PDBAPI void PdbStreamClose(PDB_STREAM* stream);
 
+	PDBAPI PDB_FILE* PdbStreamGetPdb(PDB_STREAM* stream);
 	PDBAPI uint32_t PdbStreamGetSize(PDB_STREAM* stream);
 	PDBAPI bool PdbStreamRead(PDB_STREAM* stream, uint8_t* buff, uint64_t bytes);
 	PDBAPI bool PdbStreamSeek(PDB_STREAM* stream, uint64_t offset);
