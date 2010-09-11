@@ -29,6 +29,7 @@ char* g_pdbFile = NULL; // The full path and file name of the pdb file we are op
 bool g_dumpStream = false; // Do we want to dump a stream?
 uint32_t g_dumpStreamId = (uint32_t)-1; // The stream id to dump if dump is true.
 bool g_dumpType = false; // Do we want to dump a type?
+bool g_dumpAllTypes = false;
 char* g_type = NULL;
 
 
@@ -59,17 +60,21 @@ static bool ParseCommandLine(int argc, char** argv)
 
 	if (argc == 4)
 	{
-		if ((strcasecmp(argv[1], "-d") != 0)
-			&& (strcasecmp(argv[1], "--dump-stream") != 0))
+		if ((strcasecmp(argv[1], "-d") == 0)
+			|| (strcasecmp(argv[1], "--dump-stream") == 0))
 		{
 			g_dumpStream = true;
 			g_dumpStreamId = atoi(argv[2]);
 		}
-		else if ((strcasecmp(argv[1], "-dt") != 0)
-			&& (strcasecmp(argv[1], "--dump-type") != 0))
+		else if ((strcasecmp(argv[1], "-dt") == 0)
+			|| (strcasecmp(argv[1], "--dump-type") == 0))
 		{
 			g_dumpType = true;
-			g_type = argv[3];
+
+			if (strcasecmp(argv[3], "all") == 0)
+				g_dumpAllTypes = true;
+			else
+				g_type = argv[3];
 		}
 		g_pdbFile = argv[3];
 
@@ -154,6 +159,13 @@ int main(int argc, char** argv)
 			fprintf(stderr, "Failed to open pdb types.\n");
 			PdbClose(pdb);
 			return 6;
+		}
+
+		if (g_dumpAllTypes)
+		{
+		}
+		else
+		{
 		}
 
 		PdbTypesClose(types);

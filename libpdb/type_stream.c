@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 */
+#include <string.h>
+
 #include "pdb.h"
 #include "type_stream.h"
 
@@ -45,9 +47,9 @@ typedef struct PDB_TYPES_HASH
 	PDB_STREAM* stream;
 	uint32_t keySize;
 	uint32_t buckets;
-	PDB_TYPES_HASH_ENTRY hashValues;
-	PDB_TYPES_HASH_ENTRY typeOffsets;
-	PDB_TYPES_HASH_ENTRY hashAdjustment;
+	PDB_TYPES_HASH_ENTRY values;
+	PDB_TYPES_HASH_ENTRY types;
+	PDB_TYPES_HASH_ENTRY adjustments;
 } PDB_TYPES_HASH;
 
 typedef struct TYPE_STREAM_HEADER
@@ -60,7 +62,6 @@ typedef struct TYPE_STREAM_HEADER
 	PDB_TYPES_HASH hash;
 } TYPE_STREAM_HEADER;
 
-
 typedef struct PDB_TYPES
 {
 	PDB_STREAM* stream;
@@ -69,6 +70,62 @@ typedef struct PDB_TYPES
 	uint32_t maxId;
 	PDB_TYPES_HASH* hash;
 } PDB_TYPES;
+
+typedef struct PDB_TYPE_PROPERTIES
+{
+	uint16_t packed : 1;
+	uint16_t ctor : 1;
+	uint16_t ovlops : 1; // ?
+	uint16_t isnested : 1; // ?
+	uint16_t cnested : 1; // ?
+	uint16_t opassign : 1; // ?
+	uint16_t opcast : 1; // ?
+	uint16_t fwdref : 1;
+	uint16_t scoped : 1;
+	uint16_t reserved : 1;
+} PDB_TYPE_PROPERTIES;
+
+typedef struct PDB_TYPE_FIELD_ATTRIBUTES
+{
+	uint16_t access : 2;
+	uint16_t mprop : 3;
+	uint16_t psuedo : 1;
+	uint16_t noinherit : 1;
+	uint16_t noconstruct : 1;
+	uint16_t compgenx : 1;
+	uint16_t reserved : 7;
+} PDB_TYPE_FIELD_ATTRIBUTES;
+
+
+// My interpretation of the algorithm in Ch 7.5 Hash table and sort table descriptions
+// in "Microsoft Symbol and Type Information" at
+// http://pierrelib.pagesperso-orange.fr/exec_formats/MS_Symbol_Type_v1.0.pdf
+static uint32_t CalcTypeHash(const char* typeName)
+{
+	size_t len = strlen(typeName) + 1;
+	const uint32_t* pName = (uint32_t*)typeName;
+	uint32_t end = 0;
+	size_t i;
+	uint32_t sum;
+
+	while (len & 3)
+	{
+		end |= (typeName[len - 1] & 0xdf); // toupper
+		end <<= 8;
+		len--;
+	}
+
+	len /= 4;
+
+	for (i = 0; i < len; i++)
+	{
+		sum ^= (pName[i] & 0xdfdfdfdf); // toupper
+		sum = (sum << 4) | (sum >> 28); //rotl sum, 4
+	}
+	sum ^= end;
+
+	return sum;
+}
 
 
 static PDB_TYPES_HASH* PdbTypesHashOpen(PDB_TYPES* types, uint32_t hashStreamId)
@@ -90,8 +147,23 @@ static PDB_TYPES_HASH* PdbTypesHashOpen(PDB_TYPES* types, uint32_t hashStreamId)
 	if (!PdbStreamRead(types->stream, (uint8_t*)&hash->buckets, 4))
 		return false;
 
+	// Read the hash values
+	if (!PdbStreamRead(types->stream, (uint8_t*)&hash->values.offset, 4))
+		return false;
+	if (!PdbStreamRead(types->stream, (uint8_t*)&hash->values.size, 4))
+		return false;
 
+	// Read the hash indices
+	if (!PdbStreamRead(types->stream, (uint8_t*)&hash->types.offset, 4))
+		return false;
+	if (!PdbStreamRead(types->stream, (uint8_t*)&hash->types.size, 4))
+		return false;
 
+	// Read the hash adjustments
+	if (!PdbStreamRead(types->stream, (uint8_t*)&hash->adjustments.offset, 4))
+		return false;
+	if (!PdbStreamRead(types->stream, (uint8_t*)&hash->adjustments.size, 4))
+		return false;
 	
 	return hash;
 }
@@ -156,7 +228,8 @@ PDB_TYPES* PdbTypesOpen(PDB_FILE* pdb)
 	if (!PdbStreamRead(types->stream, (uint8_t*)&dataSize, 4))
 		return false;
 
-	// Sanity check -- the header numbers better agree with the stream size
+	// Sanity check -- the header numbers better agree
+	// with the actual stream size
 	if (headerSize + dataSize != PdbStreamGetSize(stream))
 		return false;
 
