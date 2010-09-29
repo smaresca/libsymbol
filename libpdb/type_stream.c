@@ -26,6 +26,8 @@ THE SOFTWARE.
 #include "type_stream.h"
 
 
+#define PDB_TYPES_HEADER_SIZE           0x38
+
 #define PDB_VERSION_VC2                 19941610
 #define PDB_VERSION_VC4                 19950623
 #define PDB_VERSION_VC41                19950814
@@ -52,22 +54,13 @@ typedef struct PDB_TYPES_HASH
 	PDB_TYPES_HASH_ENTRY adjustments;
 } PDB_TYPES_HASH;
 
-typedef struct TYPE_STREAM_HEADER
-{
-	uint32_t version;
-	uint32_t size; // header size
-	uint32_t minIndex;
-	uint32_t maxIndex;
-	uint32_t dataSize; // bytes after the header
-	PDB_TYPES_HASH hash;
-} TYPE_STREAM_HEADER;
-
 typedef struct PDB_TYPES
 {
 	PDB_STREAM* stream;
 	uint32_t version;
 	uint32_t minId;
 	uint32_t maxId;
+	uint32_t len; // The amount of data after the header
 	PDB_TYPES_HASH* hash;
 } PDB_TYPES;
 
@@ -95,6 +88,11 @@ typedef struct PDB_TYPE_FIELD_ATTRIBUTES
 	uint16_t compgenx : 1;
 	uint16_t reserved : 7;
 } PDB_TYPE_FIELD_ATTRIBUTES;
+
+typedef struct PDB_TYPE
+{
+	PDB_LEAF_TYPES type;
+} PDB_TYPE;
 
 
 // My interpretation of the algorithm in Ch 7.5 Hash table and sort table descriptions
@@ -124,7 +122,7 @@ static uint32_t CalcTypeHash(const char* typeName)
 	}
 	sum ^= end;
 
-	return sum;
+	return sum; // take modulus of hash buckets
 }
 
 
@@ -181,7 +179,6 @@ PDB_TYPES* PdbTypesOpen(PDB_FILE* pdb)
 	PDB_TYPES* types;
 	uint32_t version;
 	uint32_t headerSize;
-	uint32_t dataSize;
 	uint32_t hashStreamId;
 
 	// Get the types stream
@@ -193,14 +190,14 @@ PDB_TYPES* PdbTypesOpen(PDB_FILE* pdb)
 
 	// Check the version
 	if ((version != PDB_VERSION_VC2)
-		|| (version != PDB_VERSION_VC2)
-		|| (version != PDB_VERSION_VC4)
-		|| (version != PDB_VERSION_VC41)
-		|| (version != PDB_VERSION_VC50)
-		|| (version != PDB_VERSION_VC60)
-		|| (version != PDB_VERSION_VC70)
-		|| (version != PDB_VERSION_VC71)
-		|| (version != PDB_VERSION_VC8))
+		&& (version != PDB_VERSION_VC2)
+		&& (version != PDB_VERSION_VC4)
+		&& (version != PDB_VERSION_VC41)
+		&& (version != PDB_VERSION_VC50)
+		&& (version != PDB_VERSION_VC60)
+		&& (version != PDB_VERSION_VC70)
+		&& (version != PDB_VERSION_VC71)
+		&& (version != PDB_VERSION_VC8))
 	{
 		// Can't support this version
 		PdbStreamClose(stream);
@@ -214,34 +211,129 @@ PDB_TYPES* PdbTypesOpen(PDB_FILE* pdb)
 
 	// Get the header size, for sanity checking purposes
 	if (!PdbStreamRead(types->stream, (uint8_t*)&headerSize, 4))
-		return false;
+		goto FAIL;
 
 	// Get the minimum type index
 	if (!PdbStreamRead(types->stream, (uint8_t*)&types->minId, 4))
-		return false;
+		goto FAIL;
 
 	// Get the maximum type index
 	if (!PdbStreamRead(types->stream, (uint8_t*)&types->maxId, 4))
-		return false;
+		goto FAIL;
 
 	// Get the size of the data following the header
-	if (!PdbStreamRead(types->stream, (uint8_t*)&dataSize, 4))
-		return false;
+	if (!PdbStreamRead(types->stream, (uint8_t*)&types->len, 4))
+		goto FAIL;
 
 	// Sanity check -- the header numbers better agree
 	// with the actual stream size
-	if (headerSize + dataSize != PdbStreamGetSize(stream))
-		return false;
+	if (headerSize + types->len != PdbStreamGetSize(stream))
+		goto FAIL;
 
 	// Get the type hash stream number
 	if (!PdbStreamRead(types->stream, (uint8_t*)&hashStreamId, 4))
-		return false;
+		goto FAIL;
 
 	// Sanity check before opening
 	if (hashStreamId >= PdbGetStreamCount(pdb))
 		types->hash = PdbTypesHashOpen(types, hashStreamId);
 
 	return types;
+
+FAIL:
+	PdbStreamClose(stream);
+	free(types);
+
+	return NULL;
+}
+
+
+static bool DecodeStructureType(PDB_TYPES* types, PdbTypeEnumFunction typeFn)
+{
+}
+
+
+bool PdbTypesEnumerate(PDB_TYPES* types, PdbTypeEnumFunction typeFn)
+{
+	uint16_t type;
+	uint32_t len = types->len;
+
+	// Seek to the beginning of all types
+	if (!PdbStreamSeek(types->stream, PDB_TYPES_HEADER_SIZE))
+		return false;
+
+	while (len)
+	{
+		uint16_t typeLen;
+		uint8_t* buff = NULL;
+
+		if (!PdbStreamRead(types->stream, (uint8_t*)&typeLen, 2))
+			return false;
+
+		// Pass this type (and size, which is not accounted for)
+		len -= (typeLen + 2);
+
+		// Get the type type (LEAF_TYPE_?)
+		if (!PdbStreamRead(types->stream, (uint8_t*)&type, 2))
+			return false;
+
+		buff = (uint8_t*)malloc(typeLen);
+
+		if (!PdbStreamRead(types->stream, buff, typeLen - 2))
+		{
+			free(buff);
+			return false;
+		}
+
+		switch (type)
+		{
+		case LEAF_TYPE_STRUCTURE:
+			printf("STRUCTURE TYPE\n");
+			break;
+		case LEAF_TYPE_POINTER:
+			printf("POINTER TYPE\n");
+			break;
+		case LEAF_TYPE_FIELDLIST:
+			printf("FIELDLIST TYPE\n");
+			break;
+		case LEAF_TYPE_UNION:
+			printf("UNION TYPE\n");
+			break;
+		case LEAF_TYPE_BITFIELD:
+			printf("BITFIELD TYPE\n");
+			break;
+		case LEAF_TYPE_ENUM:
+			printf("ENUM TYPE\n");
+			break;
+		case LEAF_TYPE_ARRAY:
+			printf("ARRAY TYPE\n");
+			break;
+		case LEAF_TYPE_PROCEDURE:
+			printf("PROCEDURE TYPE\n");
+			break;
+		case LEAF_TYPE_ARGLIST:
+			printf("ARGLIST TYPE\n");
+			break;
+		case LEAF_TYPE_MODIFIER:
+			printf("MODIFIER TYPE\n");
+			break;
+		default:
+			printf("UNKNOWN TYPE\n");
+			break;
+		};
+
+		// TODO:  Something with the type
+
+		free(buff);
+	}
+
+	return true;
+}
+
+
+uint32_t PdbTypesGetCount(PDB_TYPES* types)
+{
+	return 0;
 }
 
 

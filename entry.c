@@ -71,10 +71,10 @@ static bool ParseCommandLine(int argc, char** argv)
 		{
 			g_dumpType = true;
 
-			if (strcasecmp(argv[3], "all") == 0)
+			if (strcasecmp(argv[2], "all") == 0)
 				g_dumpAllTypes = true;
 			else
-				g_type = argv[3];
+				g_type = argv[2];
 		}
 		g_pdbFile = argv[3];
 
@@ -125,7 +125,7 @@ int main(int argc, char** argv)
 		while (bytesRemaining)
 		{
 			if (bytesRemaining > 512)
-				chunkSize = 512;
+			chunkSize = 512;
 			else
 				chunkSize = bytesRemaining;
 
@@ -163,6 +163,7 @@ int main(int argc, char** argv)
 
 		if (g_dumpAllTypes)
 		{
+			PdbTypesEnumerate(types, NULL);
 		}
 		else
 		{
