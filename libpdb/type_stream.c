@@ -94,6 +94,17 @@ typedef struct PDB_TYPE
 	PDB_LEAF_TYPES type;
 } PDB_TYPE;
 
+typedef struct PDB_LEAF_TYPE_STRUCTURE
+{
+	uint16_t lf;
+	uint16_t count;
+	uint16_t prop;
+	uint32_t field;
+	uint32_t derived;
+	uint32_t vshape;
+	char* name;
+} PDB_LEAF_TYPE_STRUCTURE;
+
 
 // My interpretation of the algorithm in Ch 7.5 Hash table and sort table descriptions
 // in "Microsoft Symbol and Type Information" at
@@ -248,8 +259,114 @@ FAIL:
 }
 
 
-static bool DecodeStructureType(PDB_TYPES* types, PdbTypeEnumFunction typeFn)
+static bool PrintStructureType(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uint8_t* buff, size_t len)
 {
+	PDB_LEAF_TYPE_STRUCTURE structType;
+	size_t nameLen;
+	uint8_t* pbuff = buff;
+
+	structType.lf = *(uint16_t*)pbuff;
+	pbuff += sizeof(uint16_t);
+
+	structType.count = *(uint16_t*)pbuff;
+	pbuff += sizeof(uint16_t);
+
+	structType.prop = *(uint16_t*)pbuff;
+	pbuff += sizeof(uint16_t);
+
+	structType.field = *(uint32_t*)pbuff;
+	pbuff += sizeof(uint32_t);
+
+	structType.derived = *(uint32_t*)pbuff;
+	pbuff += sizeof(uint32_t);
+
+	structType.vshape = *(uint32_t*)pbuff;
+	pbuff += sizeof(uint32_t);
+
+	nameLen = (len - (pbuff - buff)); // The remainder of the buffer is the name field
+
+	if (nameLen)
+	{
+		structType.name = (uint8_t*)malloc(nameLen + 1);
+		strncpy(structType.name, pbuff, nameLen);
+	}
+	else
+	{
+		structType.name = NULL;
+	}
+
+	pbuff += strlen(structType.name);
+
+	printf("struct %s, lf %x, count %x, prop %x, field %x, derived %x, vshape %x\n",
+		structType.name, (uint32_t)structType.lf, (uint32_t)structType.count,
+		(uint32_t)structType.prop, structType.field, structType.derived,
+		structType.vshape);
+
+	return true;
+}
+
+
+static bool PrintFieldList(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uint8_t* buff, size_t len)
+{
+	uint8_t* pbuff = buff;
+	size_t remainingLen = len;
+
+	while (remainingLen)
+	{
+		uint16_t typeId;
+		uint16_t lf;
+		uint8_t skip;
+		uint16_t val;
+		char* name;
+		size_t nameLen;
+
+		// Bypass padding bytes
+		while ((remainingLen > 0) && (*pbuff > 0xf0))
+		{
+			skip = (*pbuff & 0xf);
+			pbuff += skip;
+			remainingLen -= skip;
+		}
+
+		lf = *(uint16_t*)pbuff;
+		pbuff += sizeof(uint16_t);
+		remainingLen -= sizeof(uint16_t);
+
+		typeId = *(uint16_t*)pbuff;
+		pbuff += sizeof(uint16_t);
+		remainingLen -= sizeof(uint16_t);
+
+		switch (lf)
+		{
+		case LEAF_TYPE_MEMBER:
+			break;
+		case LEAF_TYPE_ENUMERATE:
+			val = *(uint16_t*)pbuff;
+			pbuff += sizeof(uint16_t);
+			remainingLen -= sizeof(uint16_t);
+			name = pbuff;
+			nameLen = strlen(name) + 1;
+			nameLen = (nameLen > remainingLen ? remainingLen : nameLen);
+			remainingLen -= nameLen;
+			pbuff += nameLen;
+			printf("%d:%s = %d\n", typeId, name, val);
+			break;
+		case LEAF_TYPE_UNION:
+			break;
+		case LEAF_TYPE_BCLASS:
+			break;
+		case LEAF_TYPE_VFUNCTAB:
+			break;
+		case LEAF_TYPE_ONEMETHOD:
+			break;
+		case LEAF_TYPE_METHOD:
+			break;
+		case LEAF_TYPE_NESTTYPE:
+			break;
+		}
+	}
+
+	return true;
 }
 
 
@@ -270,15 +387,13 @@ bool PdbTypesEnumerate(PDB_TYPES* types, PdbTypeEnumFunction typeFn)
 		if (!PdbStreamRead(types->stream, (uint8_t*)&typeLen, 2))
 			return false;
 
-		// Pass this type (and size, which is not accounted for)
-		len -= (typeLen + 2);
-
 		// Get the type type (LEAF_TYPE_?)
 		if (!PdbStreamRead(types->stream, (uint8_t*)&type, 2))
 			return false;
 
 		buff = (uint8_t*)malloc(typeLen);
 
+		// Read the data associated with the type type
 		if (!PdbStreamRead(types->stream, buff, typeLen - 2))
 		{
 			free(buff);
@@ -289,12 +404,14 @@ bool PdbTypesEnumerate(PDB_TYPES* types, PdbTypeEnumFunction typeFn)
 		{
 		case LEAF_TYPE_STRUCTURE:
 			printf("STRUCTURE TYPE\n");
+			PrintStructureType(types, typeFn, buff, typeLen - 2);
 			break;
 		case LEAF_TYPE_POINTER:
 			printf("POINTER TYPE\n");
 			break;
 		case LEAF_TYPE_FIELDLIST:
 			printf("FIELDLIST TYPE\n");
+			PrintFieldList(types, typeFn, buff, typeLen - 2);
 			break;
 		case LEAF_TYPE_UNION:
 			printf("UNION TYPE\n");
@@ -325,6 +442,9 @@ bool PdbTypesEnumerate(PDB_TYPES* types, PdbTypeEnumFunction typeFn)
 		// TODO:  Something with the type
 
 		free(buff);
+
+		// Pass this type (and size, which is not accounted for by the value read from the file)
+		len -= (typeLen + 2);
 	}
 
 	return true;

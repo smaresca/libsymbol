@@ -20,11 +20,8 @@
     <ClInclude Include="pdb.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="type_stream.c">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="type_stream.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="type_stream.h">
       <Filter>Header Files</Filter>
