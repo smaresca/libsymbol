@@ -12,7 +12,7 @@
     <ClCompile Include="pdb.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="type_stream.c">
+    <ClCompile Include="tpi.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -23,7 +23,7 @@
     <ClInclude Include="type_stream.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="type_stream.h">
+    <ClInclude Include="tpi.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

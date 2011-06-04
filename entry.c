@@ -23,7 +23,7 @@ THE SOFTWARE.
 #include <string.h>
 
 #include "pdb.h"
-#include "type_stream.h"
+#include "tpi.h"
 
 char* g_pdbFile = NULL; // The full path and file name of the pdb file we are operating on
 bool g_dumpStream = false; // Do we want to dump a stream?

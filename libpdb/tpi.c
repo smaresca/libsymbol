@@ -23,7 +23,7 @@ THE SOFTWARE.
 #include <string.h>
 
 #include "pdb.h"
-#include "type_stream.h"
+#include "tpi.h"
 
 
 #define PDB_TYPES_HEADER_SIZE           0x38
@@ -199,7 +199,7 @@ PDB_TYPES* PdbTypesOpen(PDB_FILE* pdb)
 	if (!PdbStreamRead(stream, (uint8_t*)&version, 4))
 		return NULL;
 
-	// Check the version
+	// Check for a supported version
 	if ((version != PDB_VERSION_VC2)
 		&& (version != PDB_VERSION_VC2)
 		&& (version != PDB_VERSION_VC4)
@@ -242,11 +242,11 @@ PDB_TYPES* PdbTypesOpen(PDB_FILE* pdb)
 		goto FAIL;
 
 	// Get the type hash stream number
-	if (!PdbStreamRead(types->stream, (uint8_t*)&hashStreamId, 4))
+	if (!PdbStreamRead(types->stream, (uint8_t*)&hashStreamId, 2))
 		goto FAIL;
 
 	// Sanity check before opening
-	if (hashStreamId >= PdbGetStreamCount(pdb))
+	if (hashStreamId <= PdbGetStreamCount(pdb))
 		types->hash = PdbTypesHashOpen(types, hashStreamId);
 
 	return types;
@@ -265,9 +265,6 @@ static bool PrintStructureType(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uin
 	size_t nameLen;
 	uint8_t* pbuff = buff;
 
-	structType.lf = *(uint16_t*)pbuff;
-	pbuff += sizeof(uint16_t);
-
 	structType.count = *(uint16_t*)pbuff;
 	pbuff += sizeof(uint16_t);
 
@@ -283,6 +280,11 @@ static bool PrintStructureType(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uin
 	structType.vshape = *(uint32_t*)pbuff;
 	pbuff += sizeof(uint32_t);
 
+	// MS says there are a variable number of bytes here representing
+	// the length of the structure.
+	// So far, I've seen two zero bytes.
+	pbuff += sizeof(uint16_t);
+
 	nameLen = (len - (pbuff - buff)); // The remainder of the buffer is the name field
 
 	if (nameLen)
@@ -297,8 +299,8 @@ static bool PrintStructureType(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uin
 
 	pbuff += strlen(structType.name);
 
-	printf("struct %s, lf %x, count %x, prop %x, field %x, derived %x, vshape %x\n",
-		structType.name, (uint32_t)structType.lf, (uint32_t)structType.count,
+	printf("struct name=%s count=%x prop=%x, field=%x, derived=%x, vshape=%x\n",
+		structType.name, (uint32_t)structType.count,
 		(uint32_t)structType.prop, structType.field, structType.derived,
 		structType.vshape);
 
@@ -316,17 +318,9 @@ static bool PrintFieldList(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uint8_t
 		uint16_t typeId;
 		uint16_t lf;
 		uint8_t skip;
-		uint16_t val;
+		uint32_t val;
 		char* name;
 		size_t nameLen;
-
-		// Bypass padding bytes
-		while ((remainingLen > 0) && (*pbuff > 0xf0))
-		{
-			skip = (*pbuff & 0xf);
-			pbuff += skip;
-			remainingLen -= skip;
-		}
 
 		lf = *(uint16_t*)pbuff;
 		pbuff += sizeof(uint16_t);
@@ -339,12 +333,51 @@ static bool PrintFieldList(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uint8_t
 		switch (lf)
 		{
 		case LEAF_TYPE_MEMBER:
+			remainingLen -= remainingLen;
 			break;
 		case LEAF_TYPE_ENUMERATE:
-			val = *(uint16_t*)pbuff;
+			val = (uint32_t)(*(uint16_t*)pbuff);
 			pbuff += sizeof(uint16_t);
 			remainingLen -= sizeof(uint16_t);
-			name = pbuff;
+
+			// If the high bit is set, this isn't simply the enum value
+			if (val & 0x8000)
+			{
+				// These are all the values I encountered...
+				switch (val & 0x7FF)
+				{
+				case 0:
+					// A single byte follows that is repeated through the dword
+					val = ((*(uint8_t*)pbuff) | ((*(uint8_t*)pbuff) << 8) | ((*(uint8_t*)pbuff) << 16) | ((*(uint8_t*)pbuff) << 24));
+					pbuff += sizeof(uint8_t);
+					remainingLen -= sizeof(uint8_t);
+					break;
+				case 1:
+					break;
+				case 2:
+					// The value is a word, promote to dword
+					val = (uint32_t)(*(uint16_t*)pbuff);
+					pbuff += sizeof(uint16_t);
+					remainingLen -= sizeof(uint16_t);
+					break;
+				case 3:
+					// The value that follows is a dword
+					val = *(uint32_t*)pbuff;
+					pbuff += sizeof(uint32_t);
+					remainingLen -= sizeof(uint32_t);
+					break;
+				case 4:
+					// The value that follows is a dword
+					val = *(uint32_t*)pbuff;
+					pbuff += sizeof(uint32_t);
+					remainingLen -= sizeof(uint32_t);
+					break;
+				default:
+					break;
+				}
+			}
+
+			name = (char*)pbuff;
 			nameLen = strlen(name) + 1;
 			nameLen = (nameLen > remainingLen ? remainingLen : nameLen);
 			remainingLen -= nameLen;
@@ -352,17 +385,34 @@ static bool PrintFieldList(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uint8_t
 			printf("%d:%s = %d\n", typeId, name, val);
 			break;
 		case LEAF_TYPE_UNION:
+			remainingLen -= remainingLen;
+			break;
+		case LEAF_TYPE_BITFIELD:
+			remainingLen -= remainingLen;
 			break;
 		case LEAF_TYPE_BCLASS:
+			remainingLen -= remainingLen;
 			break;
 		case LEAF_TYPE_VFUNCTAB:
+			remainingLen -= remainingLen;
 			break;
 		case LEAF_TYPE_ONEMETHOD:
+			remainingLen -= remainingLen;
 			break;
 		case LEAF_TYPE_METHOD:
+			remainingLen -= remainingLen;
 			break;
 		case LEAF_TYPE_NESTTYPE:
+			remainingLen -= remainingLen;
 			break;
+		}
+
+		// Bypass padding bytes
+		while ((remainingLen > 0) && (*pbuff > 0xf0))
+		{
+			skip = (*pbuff & 0xf);
+			pbuff += skip;
+			remainingLen -= skip;
 		}
 	}
 
@@ -403,7 +453,6 @@ bool PdbTypesEnumerate(PDB_TYPES* types, PdbTypeEnumFunction typeFn)
 		switch (type)
 		{
 		case LEAF_TYPE_STRUCTURE:
-			printf("STRUCTURE TYPE\n");
 			PrintStructureType(types, typeFn, buff, typeLen - 2);
 			break;
 		case LEAF_TYPE_POINTER:
@@ -420,7 +469,13 @@ bool PdbTypesEnumerate(PDB_TYPES* types, PdbTypeEnumFunction typeFn)
 			printf("BITFIELD TYPE\n");
 			break;
 		case LEAF_TYPE_ENUM:
-			printf("ENUM TYPE\n");
+			{
+				char* name = buff + 0xc;
+				char* tag = ((0x0e + strlen(name) + 1) < ((size_t)(typeLen - 2))) ? (name + strlen(name) + 1) : NULL; //(name + strlen(name) + 1) : NULL);
+				uint16_t count = *(uint16_t*)(buff + 2); 
+				uint32_t idx = *(uint32_t*)(buff + 8);
+				printf("ENUM name=%s tag=%s %d members fieldlist idx=%.04x\n", name, tag, count, idx);
+			}
 			break;
 		case LEAF_TYPE_ARRAY:
 			printf("ARRAY TYPE\n");
@@ -433,6 +488,18 @@ bool PdbTypesEnumerate(PDB_TYPES* types, PdbTypeEnumFunction typeFn)
 			break;
 		case LEAF_TYPE_MODIFIER:
 			printf("MODIFIER TYPE\n");
+			break;
+		case LEAF_TYPE_CLASS:
+			printf("CLASS TYPE\n");
+			break;
+		case LEAF_TYPE_MFUNCTION:
+			printf("MFUNCTION TYPE\n");
+			break;
+		case LEAF_TYPE_METHODLIST:
+			printf("METHODLIST TYPE\n");
+			break;
+		case LEAF_TYPE_VTSHAPE:
+			printf("VTSHAPE TYPE\n");
 			break;
 		default:
 			printf("UNKNOWN TYPE\n");

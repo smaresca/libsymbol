@@ -24,6 +24,8 @@ writing this lib:
 
 http://moyix.blogspot.com/2007/08/pdb-stream-decomposition.html
 http://undocumented.rawol.com/ (Sven Boris Schreiber's site, of Undocumented Windows 2000 Secrets fame).
+http://pierrelib.pagesperso-orange.fr/exec_formats/MS_Symbol_Type_v1.0.pdf (Old backup of MS COFF documentation)
+http://ccimetadata.codeplex.com/ Microsoft Common Compiler Infrastructure Metadata API
 
 */
 #ifndef __PDB_H__
@@ -42,10 +44,7 @@ http://undocumented.rawol.com/ (Sven Boris Schreiber's site, of Undocumented Win
 
 	typedef __int64 off_t;
 
-	#define fseeko _fseeki64
-	#define ftello _ftelli64
-
-#else // Linux
+#else // GCC
 
 	#include <stdbool.h>
 
@@ -80,9 +79,9 @@ extern "C"
 
 	PDBAPI PDB_FILE* PdbOpen(const char* name);
 	PDBAPI void PdbClose(PDB_FILE* pdb);
-	PDBAPI uint32_t PdbGetStreamCount(PDB_FILE* pdb);
+	PDBAPI uint16_t PdbGetStreamCount(PDB_FILE* pdb);
 
-	PDBAPI PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId);
+	PDBAPI PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint16_t streamId);
 	PDBAPI void PdbStreamClose(PDB_STREAM* stream);
 
 	PDBAPI PDB_FILE* PdbStreamGetPdb(PDB_STREAM* stream);

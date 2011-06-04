@@ -136,11 +136,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="pdb.c" />
-    <ClCompile Include="type_stream.c" />
+    <ClCompile Include="tpi.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pdb.h" />
-    <ClInclude Include="type_stream.h" />
+    <ClInclude Include="tpi.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

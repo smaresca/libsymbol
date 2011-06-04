@@ -24,6 +24,8 @@ writing this lib:
 
 http://moyix.blogspot.com/2007/08/pdb-stream-decomposition.html
 http://undocumented.rawol.com/ (Sven Boris Schreiber's site, of Undocumented Windows 2000 Secrets fame).
+http://pierrelib.pagesperso-orange.fr/exec_formats/MS_Symbol_Type_v1.0.pdf (Old backup of MS COFF documentation)
+http://ccimetadata.codeplex.com/ Microsoft Common Compiler Infrastructure Metadata API
 
 */
 
@@ -40,12 +42,18 @@ const char PDB_SIGNATURE_V7[] = "Microsoft C/C++ MSF 7.00\r\n";
 #define PDB_HEADEr_SIZE_V7 (sizeof(PDB_SIGNATURE_V7) + 5)
 
 
+#ifdef WIN32
+#define fseeko _fseeki64
+#define ftello _ftelli64
+#endif /* WIN32 */
+
+
 struct PDB_FILE
 {
 	char* name; // file name
 	FILE* file;
 	uint8_t version; // version from the header (2 or 7 are known)
-	uint32_t streamCount; // number of streams in the file
+	uint16_t streamCount; // number of streams in the file
 	uint32_t pageSize; // bytes per page
 	uint32_t pageCount; // total file bytes / page bytes
 	uint32_t flagPage;
@@ -58,6 +66,7 @@ struct PDB_FILE
 struct PDB_STREAM
 {
 	PDB_FILE* pdb;
+	uint16_t id; // The stream index
 	uint32_t* pages; // The indices of the pages comprising the stream
 	uint64_t currentOffset; // The current offset
 	uint32_t pageCount; // Total pages in this stream
@@ -111,7 +120,7 @@ static uint32_t GetPageCount(PDB_FILE* pdb, uint32_t bytes)
 }
 
 
-uint32_t PdbGetStreamCount(PDB_FILE* pdb)
+uint16_t PdbGetStreamCount(PDB_FILE* pdb)
 {
 	return pdb->streamCount;
 }
@@ -123,6 +132,7 @@ static bool PdbStreamOpenRoot(PDB_FILE* pdb, uint32_t rootStreamPageIndex, uint3
 	size_t i;
 
 	pdb->root = root;
+	root->id = -1;
 	root->pdb = pdb;
 	root->currentOffset = 0;
 	root->size = size;
@@ -172,7 +182,7 @@ static bool PdbStreamOpenRoot(PDB_FILE* pdb, uint32_t rootStreamPageIndex, uint3
 }
 
 
-static bool PdbSeekToStreamSize(PDB_FILE* pdb, uint32_t streamId)
+static bool PdbSeekToStreamSize(PDB_FILE* pdb, uint16_t streamId)
 {
 	uint32_t streamSizesOffset;
 
@@ -187,12 +197,12 @@ static bool PdbSeekToStreamSize(PDB_FILE* pdb, uint32_t streamId)
 }
 
 
-static bool PdbSeekToStreamPageDirectory(PDB_FILE* pdb, uint32_t streamId, uint32_t* streamSize)
+static bool PdbSeekToStreamPageDirectory(PDB_FILE* pdb, uint16_t streamId, uint32_t* streamSize)
 {
 	uint32_t directoriesBase; // The beginning of the directories in the root stream
 	uint32_t streamDirectoryOffset; // The offset in the page directories for the stream of interest
 	uint32_t offset; // The final offset to seek to
-	uint32_t i;
+	uint16_t i;
 
 	// Sanity check the stream id
 	if (streamId >= pdb->streamCount)
@@ -275,13 +285,14 @@ bool PdbStreamSeek(PDB_STREAM* stream, uint64_t offset)
 }
 
 
-PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint32_t streamId)
+PDB_STREAM* PdbStreamOpen(PDB_FILE* pdb, uint16_t streamId)
 {
 	PDB_STREAM* stream;
 	uint32_t i;
 
 	stream = (PDB_STREAM*)malloc(sizeof(PDB_STREAM));
 	stream->pdb = pdb;
+	stream->id = streamId;
 
 	// Seek to the stream info and get the page size
 	if (!PdbSeekToStreamPageDirectory(pdb, streamId, &stream->size))
