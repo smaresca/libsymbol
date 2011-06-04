@@ -53,7 +53,7 @@ struct PDB_FILE
 	char* name; // file name
 	FILE* file;
 	uint8_t version; // version from the header (2 or 7 are known)
-	uint16_t streamCount; // number of streams in the file
+	uint32_t streamCount; // number of streams in the file
 	uint32_t pageSize; // bytes per page
 	uint32_t pageCount; // total file bytes / page bytes
 	uint32_t flagPage;
