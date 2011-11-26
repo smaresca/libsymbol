@@ -162,12 +162,9 @@ int main(int argc, char** argv)
 		}
 
 		if (g_dumpAllTypes)
-		{
 			PdbTypesEnumerate(types, NULL);
-		}
 		else
-		{
-		}
+			PdbTypesPrint(types, g_type, NULL);
 
 		PdbTypesClose(types);
 	}

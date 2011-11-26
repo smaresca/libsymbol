@@ -201,6 +201,7 @@ extern "C"
 	PDBAPI void PdbTypesClose(PDB_TYPES* types);
 
 	PDBAPI uint32_t PdbTypesGetCount(PDB_TYPES* types);
+	PDBAPI bool PdbTypesPrint(PDB_TYPES* types, const char* name, PdbTypeEnumFunction typeFn);
 	PDBAPI bool PdbTypesEnumerate(PDB_TYPES* types, PdbTypeEnumFunction typeFn);
 
 

@@ -15,6 +15,9 @@
     <ClCompile Include="tpi.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="names.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pdb.h">
@@ -24,6 +27,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="tpi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="names.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -126,7 +126,7 @@ uint16_t PdbGetStreamCount(PDB_FILE* pdb)
 }
 
 
-static bool PdbStreamOpenRoot(PDB_FILE* pdb, uint32_t rootStreamPageIndex, uint32_t size)
+static bool PdbStreamOpenRoot(PDB_FILE* pdb, uint16_t rootStreamPageIndex, uint32_t size)
 {
 	PDB_STREAM* root = (PDB_STREAM*)malloc(sizeof(PDB_STREAM));
 	size_t i;
@@ -337,12 +337,12 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 	// First try to read the longer (older) signature
 	if (fread(buff, 1, sizeof(PDB_SIGNATURE_V2), pdb->file) == sizeof(PDB_SIGNATURE_V2))
 	{
+		uint32_t rootSize;
+		uint16_t rootStreamId;
+
 		// See if we have a match
 		if (memcmp(PDB_SIGNATURE_V2, buff, sizeof(PDB_SIGNATURE_V2) - 1) == 0)
 		{
-			uint32_t rootSize;
-			uint16_t rootStreamId;
-
 			pdb->version = 2;
 
 			// Expecting [unknown byte]JG\0
@@ -382,8 +382,6 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 		// Now check for the newer format
 		if (memcmp(PDB_SIGNATURE_V7, buff, sizeof(PDB_SIGNATURE_V7) - 1) == 0)
 		{
-			uint32_t rootSize, rootStreamId;
-
 			pdb->version = 7;
 
 			// We went past the end of the signature because the V2 sig is
@@ -437,6 +435,9 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 
 PDB_FILE* PdbOpen(const char* name)
 {
+	// TODO:  Ensure the file is not writable by other processes while
+	// we have it open to avoid potential memory corruption due to having some
+	// parts of the file cached and others not (and no refresh mechanism)
 	FILE* file = fopen(name, "rb");
 	PDB_FILE* pdb;
 

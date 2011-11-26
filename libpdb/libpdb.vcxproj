@@ -135,10 +135,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="names.c" />
     <ClCompile Include="pdb.c" />
     <ClCompile Include="tpi.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="names.h" />
     <ClInclude Include="pdb.h" />
     <ClInclude Include="tpi.h" />
   </ItemGroup>

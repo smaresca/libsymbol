@@ -58,6 +58,7 @@ typedef struct PDB_TYPES
 {
 	PDB_STREAM* stream;
 	uint32_t version;
+	uint32_t headerSize;
 	uint32_t minId;
 	uint32_t maxId;
 	uint32_t len; // The amount of data after the header
@@ -189,7 +190,6 @@ PDB_TYPES* PdbTypesOpen(PDB_FILE* pdb)
 {
 	PDB_TYPES* types;
 	uint32_t version;
-	uint32_t headerSize;
 	uint32_t hashStreamId;
 
 	// Get the types stream
@@ -221,7 +221,7 @@ PDB_TYPES* PdbTypesOpen(PDB_FILE* pdb)
 	types->hash = NULL;
 
 	// Get the header size, for sanity checking purposes
-	if (!PdbStreamRead(types->stream, (uint8_t*)&headerSize, 4))
+	if (!PdbStreamRead(types->stream, (uint8_t*)&types->headerSize, 4))
 		goto FAIL;
 
 	// Get the minimum type index
@@ -238,7 +238,7 @@ PDB_TYPES* PdbTypesOpen(PDB_FILE* pdb)
 
 	// Sanity check -- the header numbers better agree
 	// with the actual stream size
-	if (headerSize + types->len != PdbStreamGetSize(stream))
+	if (types->headerSize + types->len != PdbStreamGetSize(stream))
 		goto FAIL;
 
 	// Get the type hash stream number
@@ -344,7 +344,7 @@ static bool PrintFieldList(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uint8_t
 			if (val & 0x8000)
 			{
 				// These are all the values I encountered...
-				switch (val & 0x7FF)
+				switch (val & 0x7ff)
 				{
 				case 0:
 					// A single byte follows that is repeated through the dword
@@ -420,19 +420,36 @@ static bool PrintFieldList(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uint8_t
 }
 
 
+bool PdbTypesPrint(PDB_TYPES* types, const char* name, PdbTypeEnumFunction typeFn)
+{
+}
+
+
 bool PdbTypesEnumerate(PDB_TYPES* types, PdbTypeEnumFunction typeFn)
 {
 	uint16_t type;
 	uint32_t len = types->len;
+	uint32_t typeCount;
+	uint32_t i;
 
 	// Seek to the beginning of all types
-	if (!PdbStreamSeek(types->stream, PDB_TYPES_HEADER_SIZE))
+	if (!PdbStreamSeek(types->stream, types->headerSize))
 		return false;
 
-	while (len)
+	// Calculate the number of types we expect in the stream
+	typeCount = types->maxId - types->minId;
+
+	for (i = 0; i < typeCount; i++)
 	{
 		uint16_t typeLen;
 		uint8_t* buff = NULL;
+
+		// Check if we ran out of data before we ran out of types
+		if (len == 0)
+		{
+			printf("Error:  Ran out of data before ran out of types.\n");
+			return false;
+		}
 
 		if (!PdbStreamRead(types->stream, (uint8_t*)&typeLen, 2))
 			return false;
