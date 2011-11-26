@@ -27,7 +27,7 @@ THE SOFTWARE.
 
 char* g_pdbFile = NULL; // The full path and file name of the pdb file we are operating on
 bool g_dumpStream = false; // Do we want to dump a stream?
-uint32_t g_dumpStreamId = (uint32_t)-1; // The stream id to dump if dump is true.
+uint16_t g_dumpStreamId = (uint16_t)-1; // The stream id to dump if dump is true.
 bool g_dumpType = false; // Do we want to dump a type?
 bool g_dumpAllTypes = false;
 char* g_type = NULL;
@@ -64,7 +64,7 @@ static bool ParseCommandLine(int argc, char** argv)
 			|| (strcasecmp(argv[1], "--dump-stream") == 0))
 		{
 			g_dumpStream = true;
-			g_dumpStreamId = atoi(argv[2]);
+			g_dumpStreamId = (uint16_t)atoi(argv[2]);
 		}
 		else if ((strcasecmp(argv[1], "-dt") == 0)
 			|| (strcasecmp(argv[1], "--dump-type") == 0))
@@ -125,7 +125,7 @@ int main(int argc, char** argv)
 		while (bytesRemaining)
 		{
 			if (bytesRemaining > 512)
-			chunkSize = 512;
+				chunkSize = 512;
 			else
 				chunkSize = bytesRemaining;
 

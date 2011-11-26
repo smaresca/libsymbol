@@ -421,6 +421,10 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 			if (fread(&rootStreamId, 1, 2, pdb->file) != 2)
 				return false;
 
+			// Move past reserved data
+			if (fread(buff, 1, 2, pdb->file) != 2)
+				return false;
+
 			// Open the root stream (the pdb now owns rootPages storage)
 			if (!PdbStreamOpenRoot(pdb, rootStreamId, rootSize))
 				return false;
@@ -499,6 +503,7 @@ bool PdbStreamRead(PDB_STREAM* stream, uint8_t* buff, uint64_t bytes)
 	uint64_t bytesRemaining = bytes;
 	size_t bytesLeftOnPage;
 	size_t bytesToRead = (size_t)-1;
+	uint32_t pageMask;
 
 	// Ensure that the requested bytes don't run off the end of the stream
 	if (stream->currentOffset + bytes > stream->size)
@@ -518,16 +523,12 @@ bool PdbStreamRead(PDB_STREAM* stream, uint8_t* buff, uint64_t bytes)
 	// Calculate how many bytes are left on the current page, starting from the current offset
 	bytesLeftOnPage = (stream->pdb->pageSize - (stream->currentOffset % stream->pdb->pageSize));
 
+	pageMask = stream->pdb->pageSize - 1;
+
 	// Now read the remaining pages
 	while (bytesRemaining)
 	{
-		if (bytesRemaining != bytes)
-		{
-			// We actually only need to seek if we are crossing a page boundary
-			// which we will always do after the first iteration
-			if (!PdbStreamSeek(stream, stream->currentOffset))
-				return false;
-		}
+		uint64_t newOffset;
 
 		// We can only read a page at a time
 		// The first page may be shorter if the current offset is not at the beginning of the page
@@ -540,8 +541,15 @@ bool PdbStreamRead(PDB_STREAM* stream, uint8_t* buff, uint64_t bytes)
 		pbuff += bytesToRead;
 		bytesRemaining -= bytesToRead;
 
-		// Seek to the requested position
-		stream->currentOffset += bytesToRead;
+		// Seek to the next requested position
+		newOffset = stream->currentOffset + bytesToRead;
+		if (((stream->currentOffset & pageMask) + bytesToRead) >= stream->pdb->pageSize)
+		{
+			// We only need to seek if we are crossing a page boundary
+			if (!PdbStreamSeek(stream, newOffset))
+				return false;
+		}
+		stream->currentOffset = newOffset;
 
 		// Subsequent reads begin at the page offset 0, so they
 		// will read an entire page

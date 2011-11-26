@@ -114,10 +114,11 @@ static uint32_t CalcTypeHash(const char* typeName)
 {
 	size_t len = strlen(typeName) + 1;
 	const uint32_t* pName = (uint32_t*)typeName;
-	uint32_t end = 0;
+	uint32_t end;
 	size_t i;
 	uint32_t sum;
 
+	end = 0;
 	while (len & 3)
 	{
 		end |= (typeName[len - 1] & 0xdf); // toupper
@@ -126,7 +127,6 @@ static uint32_t CalcTypeHash(const char* typeName)
 	}
 
 	len /= 4;
-
 	for (i = 0; i < len; i++)
 	{
 		sum ^= (pName[i] & 0xdfdfdfdf); // toupper
@@ -141,6 +141,7 @@ static uint32_t CalcTypeHash(const char* typeName)
 static PDB_TYPES_HASH* PdbTypesHashOpen(PDB_TYPES* types, uint32_t hashStreamId)
 {
 	PDB_TYPES_HASH* hash = (PDB_TYPES_HASH*)malloc(sizeof(PDB_TYPES_HASH));
+	uint16_t reserved;
 	hash->stream = PdbStreamOpen(PdbStreamGetPdb(types->stream), hashStreamId);
 
 	if (!hash->stream)
@@ -148,6 +149,10 @@ static PDB_TYPES_HASH* PdbTypesHashOpen(PDB_TYPES* types, uint32_t hashStreamId)
 		free(hash);
 		return NULL;
 	}
+
+	// Move past the reserved word (filler to preserved alignment)
+	if (!PdbStreamRead(types->stream, (uint8_t*)&reserved, 2))
+		return false;
 
 	// Get the size of the key
 	if (!PdbStreamRead(types->stream, (uint8_t*)&hash->keySize, 4))
@@ -422,6 +427,12 @@ static bool PrintFieldList(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uint8_t
 
 bool PdbTypesPrint(PDB_TYPES* types, const char* name, PdbTypeEnumFunction typeFn)
 {
+	uint32_t typeHash;
+	uint32_t bucket;
+
+	typeHash = CalcTypeHash(name);
+	bucket = typeHash % types->hash->buckets;
+
 	return false;
 }
 
