@@ -337,8 +337,8 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 	// First try to read the longer (older) signature
 	if (fread(buff, 1, sizeof(PDB_SIGNATURE_V2), pdb->file) == sizeof(PDB_SIGNATURE_V2))
 	{
-		uint32_t rootSize;
 		uint16_t rootStreamId;
+		uint32_t rootSize;
 
 		// See if we have a match
 		if (memcmp(PDB_SIGNATURE_V2, buff, sizeof(PDB_SIGNATURE_V2) - 1) == 0)
@@ -418,7 +418,7 @@ static bool PdbParseHeader(PDB_FILE* pdb)
 				return false;
 
 			// Read the page index that contains the root stream
-			if (fread(&rootStreamId, 1, 4, pdb->file) != 4)
+			if (fread(&rootStreamId, 1, 2, pdb->file) != 2)
 				return false;
 
 			// Open the root stream (the pdb now owns rootPages storage)

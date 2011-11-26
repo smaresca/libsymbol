@@ -189,8 +189,8 @@ static void PdbTypesHashClose(PDB_TYPES_HASH* hash)
 PDB_TYPES* PdbTypesOpen(PDB_FILE* pdb)
 {
 	PDB_TYPES* types;
+	uint16_t hashStreamId;
 	uint32_t version;
-	uint32_t hashStreamId;
 
 	// Get the types stream
 	PDB_STREAM* stream = PdbStreamOpen(pdb, PDB_STREAM_TYPE_INFO);
@@ -422,6 +422,7 @@ static bool PrintFieldList(PDB_TYPES* types, PdbTypeEnumFunction typeFn, uint8_t
 
 bool PdbTypesPrint(PDB_TYPES* types, const char* name, PdbTypeEnumFunction typeFn)
 {
+	return false;
 }
 
 
